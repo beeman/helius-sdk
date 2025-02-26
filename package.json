@@ -1,5 +1,5 @@
 {
-  "name": "helius-sdk",
+  "name": "@beeman/helius-sdk-core",
   "version": "1.4.2",
   "description": "SDK for the Helius API (https://helius.xyz)",
   "main": "dist/src/index.js",
@@ -24,7 +24,6 @@
   "author": "Helius",
   "license": "ISC",
   "devDependencies": {
-    "@solana/web3.js": "^1.73.2",
     "@types/axios": "^0.14.0",
     "@types/bs58": "^4.0.4",
     "@types/jest": "^29.5.12",
@@ -43,8 +42,6 @@
     "typescript": "^5.7.3"
   },
   "dependencies": {
-    "@metaplex-foundation/mpl-token-metadata": "^2.5.2",
-    "@solana/wallet-adapter-base": "^0.9.23",
     "axios": "^1.2.3",
     "bs58": "^6.0.0"
   }

@@ -6,33 +6,14 @@ import {
   MintlistRequest,
   MintlistResponse,
   MintlistItem,
-  MintApiRequest,
-  MintApiResponse,
   MintApiAuthority,
-  DelegateCollectionAuthorityRequest,
-  RevokeCollectionAuthorityRequest,
   HeliusCluster,
   HeliusEndpoints,
-  ParseTransactionsRequest,
-  ParseTransactionsResponse,
 } from './types';
 
 import axios, { type AxiosError } from 'axios';
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
 import { getHeliusEndpoints } from './utils';
 import { RpcClient } from './RpcClient';
-import {
-  ApproveCollectionAuthorityInstructionAccounts,
-  RevokeCollectionAuthorityInstructionAccounts,
-  PROGRAM_ID as TOKEN_METADATA_PROGRAM_ID,
-  createApproveCollectionAuthorityInstruction,
-  createRevokeCollectionAuthorityInstruction,
-} from '@metaplex-foundation/mpl-token-metadata';
 import { mintApiAuthority } from './utils/mintApi';
 
 /**
@@ -44,7 +25,7 @@ export class Helius {
    * API key generated at dev.helius.xyz
    * @private
    */
-  private apiKey?: string;
+  private readonly apiKey?: string;
 
   /** The cluster in which the connection endpoint belongs to */
   public readonly cluster: HeliusCluster;
@@ -54,9 +35,6 @@ export class Helius {
 
   /** URL to the API and RPC endpoints */
   public readonly endpoints: HeliusEndpoints;
-
-  /** The connection object from Solana's SDK */
-  public readonly connection: Connection;
 
   /** The beefed up RPC client object from Helius SDK */
   public readonly rpc: RpcClient;
@@ -68,30 +46,23 @@ export class Helius {
    * Initializes Helius API client with an API key
    * @constructor
    * @param apiKey - API key generated at dev.helius.xyz
-   * @param url - Secure RPC URL generated at dev.helius.xyz
    */
   constructor(
     apiKey: string,
     cluster: HeliusCluster = 'mainnet-beta',
     id: string = 'helius-sdk',
-    url: string = ''
   ) {
     this.cluster = cluster;
     this.endpoints = getHeliusEndpoints(cluster);
 
     if (apiKey !== '') {
       this.apiKey = apiKey;
-      this.connection = new Connection(
-        `${this.endpoints.rpc}?api-key=${apiKey}`
-      );
-    } else if (url !== '') {
-      this.connection = new Connection(url);
     } else {
-      throw Error('either `apiKey` or `url` is required');
+      throw Error('either `apiKey` is required');
     }
 
-    this.endpoint = this.connection.rpcEndpoint;
-    this.rpc = new RpcClient(this.connection, id);
+    this.endpoint = this.endpoints.api;
+    this.rpc = new RpcClient(this.endpoint, id);
     this.mintApiAuthority = mintApiAuthority(cluster);
   }
   /**
@@ -382,163 +353,8 @@ export class Helius {
     }
   }
 
-  /**
-   * Mints a cNFT via Helius Mint API
-   *
-   * @deprecated This method is deprecated. The built-in image upload functionality has been removed.
-   *             Please supply a pre-uploaded image URL using the imageUrl field in your MintApiRequest.
-   *             Please refer to ZK Compression for all future compression-related work: https://docs.helius.dev/zk-compression-and-photon-api/what-is-zk-compression-on-solana
-   *
-   * @param {MintApiRequest} mintApiRequest - the request object containing the mint information
-   * @returns {Promise<MintApiResponse>} a promise that resolves to the mint response object
-   */
-  async mintCompressedNft(
-    mintApiRequest: MintApiRequest
-  ): Promise<MintApiResponse> {
-    if (mintApiRequest.imagePath || mintApiRequest.walletPrivateKey) {
-      console.warn(
-        'Deprecated: imagePath and walletPrivateKey are no longer supported. Please supply a pre-uploaded image URL using imageUrl.'
-      );
-    }
 
-    try {
-      const { data } = await axios.post(this.endpoint, {
-        jsonrpc: '2.0',
-        id: 'helius-test',
-        method: 'mintCompressedNft',
-        params: { ...mintApiRequest },
-      });
-      return data;
-    } catch (err: any | AxiosError) {
-      if (axios.isAxiosError(err)) {
-        throw new Error(
-          `error during mintCompressedNft: ${
-            err.response?.data.error.message || err
-          }`
-        );
-      } else {
-        throw new Error(`error during mintCompressedNft: ${err}`);
-      }
-    }
-  }
 
-  /**
-   * Delegates collection authority to a new address.
-   * @param {DelegateCollectionAuthorityRequest} request - The request object containing the following fields:
-   * @param {string} request.collectionMint - The address of the collection mint.
-   * @param {string} [request.newCollectionAuthority] - The new collection authority (optional). Defaults to Helius Mint API authority if none is provided.
-   * @param {Keypair} request.updateAuthorityKeypair - The keypair for the update authority for the collection.
-   * @param {Keypair} [request.payerKeypair] - The keypair for the payer (optional). Defaults to the update authority keypair if none is provided.
-   * @returns {Promise<string>} A promise that resolves to the transaction signature.
-   */
-  async delegateCollectionAuthority(
-    request: DelegateCollectionAuthorityRequest
-  ): Promise<string> {
-    try {
-      let {
-        collectionMint,
-        updateAuthorityKeypair,
-        newCollectionAuthority,
-        payerKeypair,
-      } = request;
-
-      payerKeypair = payerKeypair ?? updateAuthorityKeypair;
-      newCollectionAuthority = newCollectionAuthority ?? this.mintApiAuthority;
-
-      const collectionMintPubkey = new PublicKey(collectionMint);
-      const collectionMetadata =
-        this.getCollectionMetadataAccount(collectionMintPubkey);
-      const newCollectionAuthorityPubkey = new PublicKey(
-        newCollectionAuthority
-      );
-      const collectionAuthorityRecord = this.getCollectionAuthorityRecord(
-        collectionMintPubkey,
-        newCollectionAuthorityPubkey
-      );
-      const accounts: ApproveCollectionAuthorityInstructionAccounts = {
-        collectionAuthorityRecord,
-        newCollectionAuthority: newCollectionAuthorityPubkey,
-        updateAuthority: updateAuthorityKeypair.publicKey,
-        payer: payerKeypair.publicKey,
-        metadata: collectionMetadata,
-        mint: collectionMintPubkey,
-      };
-      const inx = createApproveCollectionAuthorityInstruction(accounts);
-      const tx = new Transaction().add(inx);
-      tx.feePayer = payerKeypair.publicKey;
-      const sig = await sendAndConfirmTransaction(
-        this.connection,
-        tx,
-        [payerKeypair, updateAuthorityKeypair],
-        {
-          commitment: 'confirmed',
-          skipPreflight: true,
-        }
-      );
-      return sig;
-    } catch (e) {
-      console.error('Failed to delegate collection authority: ', e);
-      throw e;
-    }
-  }
-
-  /**
-   * Revokes collection authority from an address.
-   * @param {RevokeCollectionAuthorityRequest} request - The request object containing the following fields:
-   * @param {string} request.collectionMint - The address of the collection mint.
-   * @param {string} [request.delegatedCollectionAuthority] - The address of the delegated collection authority (optional). Defaults to Helius Mint API authority if none is provided.
-   * @param {Keypair} request.revokeAuthorityKeypair - The keypair for the authority that revokes collection access.
-   * @param {Keypair} [request.payerKeypair] - The keypair for the payer (optional). Defaults to the revoke authority keypair if none is provided.
-   * @returns {Promise<string>} A promise that resolves to the transaction signature.
-   */
-  async revokeCollectionAuthority(
-    request: RevokeCollectionAuthorityRequest
-  ): Promise<string> {
-    try {
-      let {
-        collectionMint,
-        revokeAuthorityKeypair,
-        delegatedCollectionAuthority,
-        payerKeypair,
-      } = request;
-
-      payerKeypair = payerKeypair ?? revokeAuthorityKeypair;
-      delegatedCollectionAuthority =
-        delegatedCollectionAuthority ?? this.mintApiAuthority;
-
-      const collectionMintPubkey = new PublicKey(collectionMint);
-      const collectionAuthority = new PublicKey(delegatedCollectionAuthority);
-      const collectionMetadata =
-        this.getCollectionMetadataAccount(collectionMintPubkey);
-      const collectionAuthorityRecord = this.getCollectionAuthorityRecord(
-        collectionMintPubkey,
-        collectionAuthority
-      );
-      const accounts: RevokeCollectionAuthorityInstructionAccounts = {
-        collectionAuthorityRecord,
-        delegateAuthority: collectionAuthority,
-        revokeAuthority: revokeAuthorityKeypair.publicKey,
-        metadata: collectionMetadata,
-        mint: collectionMintPubkey,
-      };
-      const inx = createRevokeCollectionAuthorityInstruction(accounts);
-      const tx = new Transaction().add(inx);
-      tx.feePayer = payerKeypair.publicKey;
-      const sig = await sendAndConfirmTransaction(
-        this.connection,
-        tx,
-        [revokeAuthorityKeypair],
-        {
-          commitment: 'confirmed',
-          skipPreflight: true,
-        }
-      );
-      return sig;
-    } catch (e) {
-      console.error('Failed to revoke collection authority: ', e);
-      throw e;
-    }
-  }
 
   /**
    * Get the API endpoint for the specified path.
@@ -590,61 +406,5 @@ export class Helius {
     return data;
   }
 
-  private getCollectionAuthorityRecord(
-    collectionMint: PublicKey,
-    collectionAuthority: PublicKey
-  ) {
-    const [collectionAuthRecordPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('metadata'),
-        TOKEN_METADATA_PROGRAM_ID.toBuffer(),
-        collectionMint.toBuffer(),
-        Buffer.from('collection_authority'),
-        collectionAuthority.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM_ID
-    );
-    return collectionAuthRecordPda;
-  }
 
-  private getCollectionMetadataAccount(collectionMint: PublicKey) {
-    const [collectionMetadataAccount] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from('metadata', 'utf8'),
-        TOKEN_METADATA_PROGRAM_ID.toBuffer(),
-        collectionMint.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM_ID
-    );
-    return collectionMetadataAccount;
-  }
-
-  /**
-   * Parse transactions.
-   * @param {ParseTransactionsRequest} params - The request parameters
-   * @returns {Promise<ParseTransactionsResponse>} - Array of parsed transactions
-   * @throws {Error} If there was an error calling the endpoint or too many transactions to parse
-   */
-  async parseTransactions(
-    params: ParseTransactionsRequest
-  ): Promise<ParseTransactionsResponse> {
-    if (params.transactions.length > 100) {
-      throw new Error('The maximum number of transactions to parse is 100');
-    }
-
-    const response = await axios.post(
-      this.getApiEndpoint('/v0/transactions'),
-      {
-        ...params,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-    if (response.data.error) {
-      throw new Error(`RPC error: ${JSON.stringify(response.data.error)}`);
-    }
-
-    return response.data as ParseTransactionsResponse;
-  }
 }
